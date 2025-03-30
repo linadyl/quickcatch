@@ -5,8 +5,6 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "setup": "node setup-ytdl.js",
-    "postinstall": "npm run setup",
     "dev": "nodemon server.js",
     "test": "node youtube-dl-test.js"
   },

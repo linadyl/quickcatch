@@ -3,7 +3,7 @@ builder = "NIXPACKS"
 buildCommand = "npm install"
 
 [deploy]
-startCommand = "node server.js"
+startCommand = "bash start.sh"
 healthcheckPath = "/api/status"
 healthcheckTimeout = 100
 restartPolicyType = "ON_FAILURE"
@@ -11,6 +11,5 @@ restartPolicyType = "ON_FAILURE"
 [nixpacks]
 install-cmds = [
   "apt-get update",
-  "apt-get install -y ffmpeg python3 python3-pip",
-  "pip3 install -r requirements.txt"
+  "apt-get install -y ffmpeg python3 python3-pip curl"
 ]
