@@ -33,13 +33,14 @@ app.get("/api/analyze", async (req, res) => {
   // The search query for YouTube - IMPORTANT: prefix with "ytsearch:" for search
   const searchQuery = `ytsearch:${team} NHL highlights 2024`;
   const outputPath = path.resolve(__dirname, `highlight_${Date.now()}.mp4`);
+  const videoInfoPath = path.resolve(__dirname, `video_info_${Date.now()}.json`);
   
   // Mark this team as having an ongoing request
   ongoingRequests.set(team, { startTime: Date.now() });
 
   // Set a timeout to automatically clean up if the request takes too long
   const requestTimeout = setTimeout(() => {
-    cleanupRequest(team, outputPath);
+    cleanupRequest(team, outputPath, videoInfoPath);
     
     if (!res.headersSent) {
       res.status(504).json({
@@ -51,7 +52,6 @@ app.get("/api/analyze", async (req, res) => {
 
   try {
     console.log(`🔍 Searching YouTube for: ${searchQuery}`);
-    // Don't try to access getYtdlBinary as it doesn't exist in your version
 
     // Step 1: First, get the search results using youtube-dl's search feature
     // This will return info about the top video for our search query
@@ -74,6 +74,21 @@ app.get("/api/analyze", async (req, res) => {
     
     console.log(`🎥 Found video: ${videoUrl}`);
     console.log(`📊 Video title: ${firstVideo.title}`);
+    
+    // Save video metadata to pass to Python script
+    const videoInfo = {
+      title: firstVideo.title || "",
+      description: firstVideo.description || "",
+      upload_date: firstVideo.upload_date || "",
+      uploader: firstVideo.uploader || "",
+      duration: firstVideo.duration || 0,
+      view_count: firstVideo.view_count || 0,
+      team_query: team // Pass the original team query
+    };
+    
+    // Write video info to a file for the Python script
+    fs.writeFileSync(videoInfoPath, JSON.stringify(videoInfo, null, 2));
+    console.log(`✅ Saved video metadata to ${videoInfoPath}`);
     
     // Send an initial response with just the video URL so the user can start watching
     if (!res.headersSent) {
@@ -114,8 +129,8 @@ app.get("/api/analyze", async (req, res) => {
     console.log("✅ Video downloaded successfully");
     console.log("🧠 Running AI analysis with Perplexity...");
     
-    // Run the Python script to analyze the video with the correct path
-    const pythonProcess = execFile("python3", ["analyze_highlight.py", outputPath], { cwd: __dirname }, 
+    // Run the Python script to analyze the video with the correct path and video info
+    const pythonProcess = execFile("python3", ["analyze_highlight.py", finalVideoPath, videoInfoPath], { cwd: __dirname }, 
       (error, stdout, stderr) => {
         clearTimeout(requestTimeout);
         
@@ -170,8 +185,9 @@ app.get("/api/analyze", async (req, res) => {
           }
         }
         
-        // Clean up the downloaded video
+        // Clean up the downloaded video and info file
         cleanupVideo(outputPath);
+        cleanupInfoFile(videoInfoPath);
       }
     );
     
@@ -195,6 +211,7 @@ app.get("/api/analyze", async (req, res) => {
         
         // Clean up
         cleanupVideo(outputPath);
+        cleanupInfoFile(videoInfoPath);
       }
     }, 2 * 60 * 1000); // 2 minutes
     
@@ -207,11 +224,12 @@ app.get("/api/analyze", async (req, res) => {
     
     // Clean up downloaded files
     cleanupVideo(outputPath);
+    cleanupInfoFile(videoInfoPath);
     
     if (!res.headersSent) {
       // Try to send a more useful error message
       let errorMessage = "An unexpected error occurred.";
-      if (err.message.includes("No videos found")) {
+      if (err.message && err.message.includes("No videos found")) {
         errorMessage = `No highlight videos found for ${team}.`;
       } else if (err.stderr && err.stderr.includes("ERROR:")) {
         // Extract the actual error from youtube-dl's output
@@ -271,16 +289,35 @@ function cleanupVideo(videoPath) {
       else console.log("🧹 Deleted video file:", videoPath);
     });
   }
+  
+  // Also try to remove .part file if it exists
+  const partPath = `${videoPath}.part`;
+  if (fs.existsSync(partPath)) {
+    fs.unlink(partPath, (err) => {
+      if (err) console.warn("⚠️ Could not delete .part file:", err);
+      else console.log("🧹 Deleted .part file:", partPath);
+    });
+  }
 }
 
-function cleanupRequest(team, videoPath) {
+function cleanupInfoFile(infoPath) {
+  if (fs.existsSync(infoPath)) {
+    fs.unlink(infoPath, (err) => {
+      if (err) console.warn("⚠️ Could not delete info file:", err);
+      else console.log("🧹 Deleted info file:", infoPath);
+    });
+  }
+}
+
+function cleanupRequest(team, videoPath, infoPath) {
   console.log(`🧹 Cleaning up request for team: ${team}`);
   
   // Remove from ongoing requests tracking
   ongoingRequests.delete(team);
   
-  // Delete video file if it exists
+  // Delete files if they exist
   cleanupVideo(videoPath);
+  cleanupInfoFile(infoPath);
 }
 
 // Clean up cache periodically

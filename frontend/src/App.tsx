@@ -3,8 +3,8 @@ import SearchBar from "./components/SearchBar";
 import TeamList from "./components/TeamList";
 import AnalysisModal from "./components/AnalysisModal";
 import teamsData from "./data/teams.json";
-import { AnalysisResult } from "./types"; // Import from the correct location
-import ModalDebugger from "./components/ModalDebugger"; // Import the debugging tool
+import { AnalysisResult } from "./types"; 
+import ModalDebugger from "./components/ModalDebugger";
 
 const App: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState("");
@@ -13,7 +13,8 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentTeam, setCurrentTeam] = useState<string>("");
-  const [showDebugger, setShowDebugger] = useState(false); // For debug mode
+  const [showDebugger, setShowDebugger] = useState(false);
+  const [lastFetchedTeam, setLastFetchedTeam] = useState<string>("");
 
   // Filter teams by search
   const filteredTeams = teamsData.map((division) => ({
@@ -33,55 +34,68 @@ const App: React.FC = () => {
   });
 
   // Fetch analysis from backend with timeout
-  const handleTeamClick = async (teamName: string) => {
-    // Show the modal immediately
-    setIsModalOpen(true);
-    setLoading(true);
-    setError(null);
-    setAnalysis(null);
-    setCurrentTeam(teamName);
+  // Fetch analysis from backend with timeout
+const handleTeamClick = async (teamName: string) => {
+  // Show the modal immediately
+  setIsModalOpen(true);
+  setLoading(true);
+  setError(null);
+  setAnalysis(null);
+  setCurrentTeam(teamName);
 
-    try {
-      console.log(`Fetching analysis for ${teamName}...`);
-      
-      // Set a timeout to handle very long requests
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error("Request timed out")), 60000); // 60-second timeout
-      });
-
-      const fetchPromise = fetch(`http://localhost:5000/api/analyze?team=${encodeURIComponent(teamName)}`);
-      
-      // Race between the fetch and the timeout
-      const response = await Promise.race([fetchPromise, timeoutPromise]) as Response;
-      
-      if (!response.ok) {
-        throw new Error(`Server returned ${response.status}: ${response.statusText}`);
-      }
-
-      // Parse the response
-      const data = await response.json();
-      console.log("Received analysis data:", data);
-      
-      // Update state with the analysis data
-      setAnalysis(data);
-    } catch (err: any) {
-      console.error("Error fetching analysis:", err);
-      setError(err.message || "An unknown error occurred");
-    } finally {
+  try {
+    console.log(`Checking existing analysis for ${teamName}...`);
+    
+    // First check if the analysis is already complete via the status endpoint
+    const statusResponse = await fetch(`http://localhost:5000/api/analysis-status?team=${encodeURIComponent(teamName)}`);
+    const statusData = await statusResponse.json();
+    
+    if (statusData.ready && statusData.data) {
+      // Analysis is already complete, use the cached result
+      console.log("Using cached analysis result");
+      setAnalysis(statusData.data);
       setLoading(false);
+      setLastFetchedTeam(teamName);
+      return;
     }
-  };
+    
+    // If no cached result, request a new analysis
+    console.log(`Fetching new analysis for ${teamName}...`);
+    
+    // Set a timeout to handle very long requests
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error("Request timed out")), 60000); // 60-second timeout
+    });
+
+    const fetchPromise = fetch(`http://localhost:5000/api/analyze?team=${encodeURIComponent(teamName)}`);
+    
+    // Race between the fetch and the timeout
+    const response = await Promise.race([fetchPromise, timeoutPromise]) as Response;
+    
+    if (!response.ok) {
+      throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+    }
+
+    // Parse the response
+    const data = await response.json();
+    console.log("Received analysis data:", data);
+    
+    // Update state with the analysis data
+    setAnalysis(data);
+    setLastFetchedTeam(teamName);
+  } catch (err: any) {
+    console.error("Error fetching analysis:", err);
+    setError(err.message || "An unknown error occurred");
+  } finally {
+    setLoading(false);
+  }
+};
 
   const closeModal = () => {
     setIsModalOpen(false);
-    setAnalysis(null);
+    // Don't reset analysis data when closing, so we can reuse it
     setError(null);
     setCurrentTeam("");
-  };
-
-  // Toggle the debugger visibility (add this to your footer or a hidden button)
-  const toggleDebugger = () => {
-    setShowDebugger(!showDebugger);
   };
 
   return (
@@ -115,19 +129,6 @@ const App: React.FC = () => {
         ))}
       </div>
 
-      {/* Debug mode toggle (hidden normally) */}
-      <div className="mt-8 text-center">
-        <button 
-          onClick={toggleDebugger}
-          className="text-xs text-gray-400 hover:text-gray-600"
-        >
-          {showDebugger ? "Hide Debugger" : "Show Debugger"}
-        </button>
-      </div>
-
-      {/* Render the debugger when enabled */}
-      {showDebugger && <ModalDebugger />}
-
       {/* Analysis modal with proper error handling */}
       <AnalysisModal
         isOpen={isModalOpen}
@@ -135,6 +136,7 @@ const App: React.FC = () => {
         analysis={analysis}
         loading={loading}
         teamName={currentTeam}
+        error={error}
       />
     </div>
   );

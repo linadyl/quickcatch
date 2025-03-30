@@ -2,11 +2,13 @@ import os
 import sys
 import time
 import json
-from dotenv import load_dotenv
-import subprocess
+import re
+import base64
+import requests
 import tempfile
 import traceback
-import requests
+import subprocess
+from dotenv import load_dotenv
 
 # Import PIL for fallback image creation
 try:
@@ -58,7 +60,7 @@ def compress_video(input_path):
         "-loglevel", "warning",  # Show only warnings or errors
         output_path
     ]
-
+    
     try:
         print("🗜️ Compressing video with ffmpeg...", file=sys.stderr)
         # Capture stderr instead of suppressing it for better error reporting
@@ -214,44 +216,247 @@ def extract_frames_simple(video_path, num_frames=3):
 
 def encode_image_to_base64(image_path):
     """Convert image to base64 for API submission."""
-    import base64
-    
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode('utf-8')
 
+def extract_subtitles(video_path):
+    """Extract subtitles or generate transcript from video audio."""
+    transcript_path = os.path.join(tempfile.gettempdir(), "transcript.txt")
+    
+    # Method 1: Try to extract embedded subtitles
+    try:
+        print("Attempting to extract embedded subtitles...", file=sys.stderr)
+        subtitle_cmd = [
+            "ffmpeg",
+            "-y",
+            "-i", video_path,
+            "-map", "0:s:0",  # First subtitle stream
+            transcript_path
+        ]
+        
+        process = subprocess.run(subtitle_cmd, check=False, stderr=subprocess.PIPE)
+        
+        if os.path.exists(transcript_path) and os.path.getsize(transcript_path) > 0:
+            with open(transcript_path, 'r', errors='replace') as f:
+                return f.read()
+    except Exception as e:
+        print(f"Error extracting subtitles: {str(e)}", file=sys.stderr)
+    
+    # Method 2: Generate speech-to-text transcript (requires whisper package)
+    try:
+        import whisper
+        print("Generating transcript with Whisper...", file=sys.stderr)
+        model = whisper.load_model("tiny")
+        result = model.transcribe(video_path)
+        return result["text"]
+    except ImportError:
+        print("Whisper package not available for transcription", file=sys.stderr)
+    except Exception as e:
+        print(f"Error generating transcript: {str(e)}", file=sys.stderr)
+    
+    # Method 3: Extract audio then attempt speech recognition
+    audio_path = os.path.join(tempfile.gettempdir(), "audio.wav")
+    try:
+        print("Extracting audio for transcript generation...", file=sys.stderr)
+        audio_cmd = [
+            "ffmpeg",
+            "-y",
+            "-i", video_path,
+            "-vn",  # No video
+            "-acodec", "pcm_s16le",
+            "-ar", "16000",
+            "-ac", "1",
+            audio_path
+        ]
+        
+        subprocess.run(audio_cmd, check=False, stderr=subprocess.DEVNULL)
+        
+        if os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
+            try:
+                import speech_recognition as sr
+                recognizer = sr.Recognizer()
+                with sr.AudioFile(audio_path) as source:
+                    audio_data = recognizer.record(source)
+                    text = recognizer.recognize_google(audio_data)
+                    return text
+            except ImportError:
+                print("SpeechRecognition package not available", file=sys.stderr)
+            except Exception as e:
+                print(f"Error in speech recognition: {str(e)}", file=sys.stderr)
+    except Exception as e:
+        print(f"Error extracting audio: {str(e)}", file=sys.stderr)
+    
+    return None
+
+def parse_video_metadata(video_info_file):
+    """Parse video metadata from the JSON info file passed from server.js"""
+    try:
+        if os.path.exists(video_info_file):
+            with open(video_info_file, 'r') as f:
+                return json.load(f)
+        return {}
+    except Exception as e:
+        print(f"Error parsing video metadata: {str(e)}", file=sys.stderr)
+        return {}
+
+def extract_team_names(title):
+    """Extract NHL team names from the video title."""
+    nhl_teams = [
+        "Anaheim Ducks", "Arizona Coyotes", "Boston Bruins", "Buffalo Sabres", 
+        "Calgary Flames", "Carolina Hurricanes", "Chicago Blackhawks", "Colorado Avalanche", 
+        "Columbus Blue Jackets", "Dallas Stars", "Detroit Red Wings", "Edmonton Oilers", 
+        "Florida Panthers", "Los Angeles Kings", "Minnesota Wild", "Montreal Canadiens", 
+        "Nashville Predators", "New Jersey Devils", "New York Islanders", "New York Rangers", 
+        "Ottawa Senators", "Philadelphia Flyers", "Pittsburgh Penguins", "San Jose Sharks", 
+        "Seattle Kraken", "St. Louis Blues", "Tampa Bay Lightning", "Toronto Maple Leafs", 
+        "Utah Hockey Club", "Vancouver Canucks", "Vegas Golden Knights", "Washington Capitals", 
+        "Winnipeg Jets"
+    ]
+    
+    # Also include shortened versions and nicknames
+    team_nicknames = {
+        "Ducks": "Anaheim Ducks", "Coyotes": "Arizona Coyotes", "Bruins": "Boston Bruins", 
+        "Sabres": "Buffalo Sabres", "Flames": "Calgary Flames", "Hurricanes": "Carolina Hurricanes", 
+        "Canes": "Carolina Hurricanes", "Blackhawks": "Chicago Blackhawks", "Hawks": "Chicago Blackhawks", 
+        "Avalanche": "Colorado Avalanche", "Avs": "Colorado Avalanche", "Blue Jackets": "Columbus Blue Jackets", 
+        "CBJ": "Columbus Blue Jackets", "Stars": "Dallas Stars", "Red Wings": "Detroit Red Wings", 
+        "Wings": "Detroit Red Wings", "Oilers": "Edmonton Oilers", "Panthers": "Florida Panthers", 
+        "Kings": "Los Angeles Kings", "Wild": "Minnesota Wild", "Canadiens": "Montreal Canadiens", 
+        "Habs": "Montreal Canadiens", "Predators": "Nashville Predators", "Preds": "Nashville Predators", 
+        "Devils": "New Jersey Devils", "Islanders": "New York Islanders", "Isles": "New York Islanders", 
+        "Rangers": "New York Rangers", "Senators": "Ottawa Senators", "Sens": "Ottawa Senators", 
+        "Flyers": "Philadelphia Flyers", "Penguins": "Pittsburgh Penguins", "Pens": "Pittsburgh Penguins", 
+        "Sharks": "San Jose Sharks", "Kraken": "Seattle Kraken", "Blues": "St. Louis Blues", 
+        "Lightning": "Tampa Bay Lightning", "Bolts": "Tampa Bay Lightning", "Maple Leafs": "Toronto Maple Leafs", 
+        "Leafs": "Toronto Maple Leafs", "Canucks": "Vancouver Canucks", "Golden Knights": "Vegas Golden Knights", 
+        "Knights": "Vegas Golden Knights", "VGK": "Vegas Golden Knights", "Capitals": "Washington Capitals", 
+        "Caps": "Washington Capitals", "Jets": "Winnipeg Jets"
+    }
+    
+    found_teams = []
+    
+    # First check for full team names
+    for team in nhl_teams:
+        if team in title:
+            found_teams.append(team)
+    
+    # If we don't have two teams yet, check for nicknames and abbreviations
+    if len(found_teams) < 2:
+        words = title.split()
+        for word in words:
+            # Clean up the word
+            clean_word = word.strip(",.@:;()-_").replace("'s", "")
+            if clean_word in team_nicknames and team_nicknames[clean_word] not in found_teams:
+                found_teams.append(team_nicknames[clean_word])
+    
+    # Common patterns like "Team1 vs Team2" or "Team1 @ Team2"
+    vs_pattern = re.search(r'(\w+)\s+(?:vs\.?|@|against|versus)\s+(\w+)', title, re.IGNORECASE)
+    if vs_pattern:
+        team1, team2 = vs_pattern.groups()
+        if team1 in team_nicknames and team_nicknames[team1] not in found_teams:
+            found_teams.append(team_nicknames[team1])
+        if team2 in team_nicknames and team_nicknames[team2] not in found_teams:
+            found_teams.append(team_nicknames[team2])
+    
+    # Return only unique team names
+    return list(set(found_teams))
+
 def extract_sections(text):
-    """Break AI output into 3 clean parts based on headings."""
+    """Break AI output into 3 clean parts based on headings while removing thinking process."""
     sections = {
         "summary": "",
         "teamPerformance": "",
         "playerPerformance": ""
     }
-    current = None
     
-    for line in text.splitlines():
+    # Remove thinking process (often appears before the actual response or between </think> tags)
+    if "</think>" in text:
+        # If there are explicit thinking tags, remove everything before the last </think>
+        text = text.split("</think>")[-1].strip()
+    
+    # Also check for other thinking patterns
+    if "First, I need to" in text:
+        thinking_start = text.find("First, I need to")
+        summary_start = text.lower().find("### summary", thinking_start)
+        if summary_start > -1:
+            text = text[summary_start:].strip()
+    
+    # Process the actual response sections
+    current = None
+    lines = text.splitlines()
+    
+    for i, line in enumerate(lines):
         line_lower = line.strip().lower()
-        if "summary" in line_lower:
+        
+        # Check for section headers
+        if "summary" in line_lower and ("###" in line_lower or line_lower.startswith("summary")):
             current = "summary"
             continue
-        elif "team performance" in line_lower:
+        elif ("team performance" in line_lower or "team analysis" in line_lower) and (
+                "###" in line_lower or line_lower.startswith("team")):
             current = "teamPerformance"
             continue
-        elif "player performance" in line_lower or "player analysis" in line_lower:
+        elif ("player performance" in line_lower or "player analysis" in line_lower) and (
+                "###" in line_lower or line_lower.startswith("player")):
             current = "playerPerformance"
             continue
+        # Check for section dividers like "---" that might indicate section breaks
+        elif "---" in line and current is not None:
+            # If we see a divider, check if next line has a new section header
+            if i + 1 < len(lines) and any(header in lines[i+1].lower() for header in ["summary", "team", "player"]):
+                continue
+                
+        # Add line to current section if we're in a section
         elif current and line.strip():
-            sections[current] += line.strip() + " "
+            # Remove citation patterns like [1][2][3] that may appear in the response
+            clean_line = re.sub(r'\[\d+\]', '', line)
+            sections[current] += clean_line.strip() + " "
     
-    # If any section is empty, provide a fallback
+    # Post-process to remove any remaining thinking artifacts
     for key in sections:
-        if not sections[key]:
+        # Remove phrases that suggest thinking
+        thinking_phrases = [
+            "I need to", "I should", "First,", "Next,", "Finally,", "Let me", 
+            "Let's", "Checking", "Verifying", "Making sure", "Ensuring",
+            "Note:", "Note that", "Remember to", "Don't forget"
+        ]
+        
+        for phrase in thinking_phrases:
+            if sections[key].startswith(phrase):
+                # Find the first sentence end after the thinking phrase
+                first_period = sections[key].find('. ', len(phrase))
+                if first_period > -1:
+                    sections[key] = sections[key][first_period + 2:]
+        
+        # If any section is empty, provide a fallback
+        if not sections[key] or sections[key].isspace():
             sections[key] = f"No {key.replace('P', ' p')} was provided in the analysis."
     
     return {k: v.strip() for k, v in sections.items()}
 
-def analyze_video_with_perplexity(video_path):
-    """Analyze video using Perplexity AI API by extracting frames."""
-    # First compress the video to reduce size
+def analyze_video_with_perplexity(video_path, video_info_file=None):
+    """Analyze video using Perplexity AI API with enhanced context."""
+    video_metadata = {}
+    if video_info_file:
+        video_metadata = parse_video_metadata(video_info_file)
+    
+    video_title = video_metadata.get('title', 'NHL Highlights')
+    video_description = video_metadata.get('description', '')
+    upload_date = video_metadata.get('upload_date', '')
+    uploader = video_metadata.get('uploader', '')
+    team_query = video_metadata.get('team_query', '')
+    
+    print(f"Video title: {video_title}", file=sys.stderr)
+    print(f"Uploader: {uploader}", file=sys.stderr)
+    print(f"Upload date: {upload_date}", file=sys.stderr)
+    print(f"Team query: {team_query}", file=sys.stderr)
+    
+    # Extract team names from title
+    teams = extract_team_names(video_title)
+    team_info = f"Teams identified: {', '.join(teams)}" if teams else "No specific teams identified"
+    print(f"{team_info}", file=sys.stderr)
+    
+    # Try to compress the video to reduce size
     try:
         compressed_path = compress_video(video_path)
         print(f"Using video file: {compressed_path}", file=sys.stderr)
@@ -273,33 +478,50 @@ def analyze_video_with_perplexity(video_path):
     if not frame_paths:
         raise ValueError("Failed to extract any frames from video")
     
+    # Extract subtitles or generate transcript if possible
+    transcript = extract_subtitles(video_path)
+    if transcript:
+        print(f"✅ Got transcript ({len(transcript)} chars)", file=sys.stderr)
+        # Limit transcript length to avoid token limits
+        transcript = transcript[:2000] + "..." if len(transcript) > 2000 else transcript
+    else:
+        transcript = "No transcript available."
+        print("❌ No transcript available", file=sys.stderr)
+    
     # Convert frames to base64
     base64_images = [encode_image_to_base64(frame) for frame in frame_paths]
     
+    # Prepare a rich context for Perplexity
+    teams_str = f"Teams: {', '.join(teams)}" if teams else ""
+    
     # Prepare the prompt for Perplexity
-    prompt = """
-This is an NHL hockey highlight video. Based on the frames shown, please analyze the game and provide your insights in exactly these three sections:
+    prompt = f"""
+This is an NHL hockey highlight video titled: "{video_title}"
+{teams_str}
+
+Video description: {video_description[:300]}
+
+The user is specifically interested in analysis for: {team_query}
+
+Based on the frames shown from this highlight video, please analyze the game with a focus on {team_query} and provide insights in exactly these three sections:
 
 ### Summary
-Write a concise summary of what's happening in the hockey highlight.
+Write a concise summary of what's happening in this NHL highlight video, focusing on {team_query}'s role in the game. Include the key moments shown and the overall narrative of the highlights from {team_query}'s perspective.
 
 ### Team Performance
-Analyze how the team(s) performed based on what you can see in the frames.
+Analyze how {team_query} performed based on what you can see in the video frames. Discuss their offensive and defensive strategies, special teams play, and overall team dynamics visible in the highlights. Focus exclusively on {team_query}, not their opponents.
 
 ### Player Performance
-Highlight any notable player performances or standout moments visible in the frames.
+Highlight specific {team_query} players visible in the frames and their contributions. Mention any standout performances, key plays, goals, assists, or defensive stops you can identify from {team_query} players only.
 
-Only respond with these three sections. Do not include any other text.
+IMPORTANT: Do not include any internal thinking or drafting process. Provide only the final sections. Do not use citations like [1], [2], etc. Write in a polished, professional style as if this is the final published analysis. Focus exclusively on {team_query}, not their opponents.
 """
-    
-    # Prepare API request to Perplexity
-    api_url = "https://api.perplexity.ai/chat/completions"
-    
+
     # Create messages with the frames as images
     messages = [
         {
             "role": "system",
-            "content": "You are a skilled sports analyst specializing in NHL hockey. Your task is to analyze hockey highlight frames and provide insightful commentary."
+            "content": "You are a skilled sports analyst specializing in NHL hockey. Your task is to analyze hockey highlight frames and provide insightful commentary. Be specific about what you see in the frames rather than making general statements about the teams. Provide only your final analysis without sharing your thinking process or drafts."
         },
         {
             "role": "user",
@@ -327,14 +549,21 @@ Only respond with these three sections. Do not include any other text.
     }
     
     data = {
-        "model": "llama-3-sonar-large-32k-online",  # Using a model that can process images
+        "model": "sonar-reasoning-pro",  # Using the specified sonar-reasoning-pro model
         "messages": messages,
-        "max_tokens": 1000
+        "max_tokens": 1000,
+        "temperature": 0.3  # Lower temperature to reduce likelihood of thinking outputs
     }
+    
+    # Define the API URL here
+    api_url = "https://api.perplexity.ai/chat/completions"
     
     print("🧠 Sending request to Perplexity AI...", file=sys.stderr)
     try:
         response = requests.post(api_url, headers=headers, json=data)
+        
+        print(f"Response status code: {response.status_code}", file=sys.stderr)
+        
         response.raise_for_status()
         
         result = response.json()
@@ -349,9 +578,14 @@ Only respond with these three sections. Do not include any other text.
     
     except Exception as e:
         print(f"Error in Perplexity API request: {str(e)}", file=sys.stderr)
+        print(f"Response status code: {response.status_code if 'response' in locals() else 'N/A'}", file=sys.stderr)
+        try:
+            print(f"Response body: {response.text if 'response' in locals() else 'N/A'}", file=sys.stderr)
+        except:
+            print("Could not print response body", file=sys.stderr)
         raise
 
-def analyze_video(video_path):
+def analyze_video(video_path, video_info_file=None):
     """Main function to analyze a video file."""
     # Check if the file exists
     if not os.path.exists(video_path):
@@ -366,8 +600,8 @@ def analyze_video(video_path):
     print(f"Processing video: {video_path}", file=sys.stderr)
     
     try:
-        # Use Perplexity AI to analyze the video frames
-        return analyze_video_with_perplexity(video_path)
+        # Use Perplexity AI to analyze the video frames with enhanced context
+        return analyze_video_with_perplexity(video_path, video_info_file)
     
     except Exception as e:
         print(f"Error in analyze_video: {str(e)}", file=sys.stderr)
@@ -384,12 +618,19 @@ def generate_mock_analysis():
 
 if __name__ == "__main__":
     try:
-        # Check if a video path was provided
+        # Check if video path was provided
         if len(sys.argv) < 2:
-            raise ValueError("Missing video path. Usage: python analyze_highlight.py VIDEO_PATH")
+            raise ValueError("Missing video path. Usage: python analyze_highlight.py VIDEO_PATH [VIDEO_INFO_FILE]")
         
         video_path = os.path.abspath(sys.argv[1])
-        analysis = analyze_video(video_path)
+        
+        # Check if video info file was provided as second argument
+        video_info_file = None
+        if len(sys.argv) > 2:
+            video_info_file = os.path.abspath(sys.argv[2])
+            print(f"Using video metadata from: {video_info_file}", file=sys.stderr)
+        
+        analysis = analyze_video(video_path, video_info_file)
         print(json.dumps(analysis))
     
     except Exception as e:
