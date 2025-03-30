@@ -41,7 +41,7 @@ pip install -r requirements.txt
 3. Create a `.env` file in the backend directory with the following:
 ```
 PERPLEXITY_API_KEY=your_perplexity_api_key
-EMAIL_SERVICE=your_email_service (e.g., gmail)
+EMAIL_SERVICE=gmail
 EMAIL_USER=your_email@example.com
 EMAIL_PASSWORD=your_email_password
 ```
