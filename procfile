@@ -1,0 +1,1 @@
+web: cd server && NODE_ENV=production USE_DUMMY_DATA=true node server.js

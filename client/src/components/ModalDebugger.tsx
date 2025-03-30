@@ -22,7 +22,7 @@ const ModalDebugger: React.FC = () => {
     
     try {
       // Use the actual API endpoint
-      const response = await fetch(`http://localhost:5000/api/analyze?team=${encodeURIComponent(team)}`);
+      const response = await fetch(`/api/analyze?team=${encodeURIComponent(team)}`);
       
       // Log raw response for debugging
       console.log("Raw response:", response);
@@ -47,7 +47,7 @@ const ModalDebugger: React.FC = () => {
     const checkServer = async () => {
       try {
         // Simple check to see if server is responding
-        const response = await fetch('http://localhost:5000/api/status', { method: 'GET' });
+        const response = await fetch('/api/status', { method: 'GET' });
         
         if (response.ok) {
           console.log("Server is running!");

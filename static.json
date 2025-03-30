@@ -1,0 +1,7 @@
+{
+    "headers": {
+      "/**": {
+        "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://*.railway.app; frame-src 'self' https://www.youtube.com;"
+      }
+    }
+  }

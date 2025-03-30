@@ -25,7 +25,7 @@ export const sendAnalysisEmail = async (
   analysis: AnalysisResult
 ): Promise<EmailResponse> => {
   try {
-    const response = await fetch('http://localhost:5000/api/email/send', {
+    const response = await fetch('/api/email/send', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

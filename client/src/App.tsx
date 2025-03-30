@@ -49,7 +49,7 @@ const App: React.FC = () => {
       console.log(`Checking existing analysis for ${teamName}...`);
       
       // First check if the analysis is already complete via the status endpoint
-      const statusResponse = await fetch(`http://localhost:5000/api/analysis-status?team=${encodeURIComponent(teamName)}`);
+      const statusResponse = await fetch(`/api/analysis-status?team=${encodeURIComponent(teamName)}`);
       const statusData = await statusResponse.json();
       
       if (statusData.ready && statusData.data) {
@@ -69,7 +69,7 @@ const App: React.FC = () => {
         setTimeout(() => reject(new Error("Request timed out")), 60000); // 60-second timeout
       });
 
-      const fetchPromise = fetch(`http://localhost:5000/api/analyze?team=${encodeURIComponent(teamName)}`);
+      const fetchPromise = fetch(`/api/analyze?team=${encodeURIComponent(teamName)}`)
       
       // Race between the fetch and the timeout
       const response = await Promise.race([fetchPromise, timeoutPromise]) as Response;

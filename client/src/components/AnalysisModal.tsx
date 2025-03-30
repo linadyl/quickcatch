@@ -110,7 +110,7 @@ const AnalysisModal: React.FC<AnalysisModalProps> = ({
       try {
         console.log(`Polling for ${teamName} analysis update... (attempt ${pollingCount + 1})`);
         const response = await fetch(
-          `http://localhost:5000/api/analysis-status?team=${encodeURIComponent(teamName)}`
+          `/api/analysis-status?team=${encodeURIComponent(teamName)}`
         );
         const data = await response.json();
         
