@@ -4,9 +4,10 @@ const youtubedl = require("youtube-dl-exec");
 const { execFile } = require("child_process");
 const fs = require("fs");
 const path = require("path");
+const emailService = require("./emailService"); // Import our email service
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = 5000;
 
 // Enable CORS and JSON parsing
 app.use(cors());
@@ -15,24 +16,8 @@ app.use(express.json());
 // Track ongoing requests to prevent duplicates
 const ongoingRequests = new Map();
 
-// Simple health check endpoint
-app.get("/api/status", (req, res) => {
-  res.json({
-    status: "online",
-    uptime: process.uptime()
-  });
-});
-
-// Root endpoint with simple status page
-app.get("/", (req, res) => {
-  res.send(`
-    <html><body>
-      <h1>NHL Highlights API</h1>
-      <p>Server is running</p>
-      <p>Uptime: ${Math.floor(process.uptime() / 60)} minutes</p>
-    </body></html>
-  `);
-});
+// Register email service routes
+app.use("/api/email", emailService);
 
 app.get("/api/analyze", async (req, res) => {
   const team = req.query.team;
@@ -44,11 +29,12 @@ app.get("/api/analyze", async (req, res) => {
   // Check if there's already an analysis in progress for this team
   if (ongoingRequests.has(team)) {
     return res.status(429).json({ 
-      error: "Analysis for this team is already in progress"
+      error: "Analysis for this team is already in progress",
+      message: "Please wait for the current analysis to complete or try a different team."
     });
   }
 
-  // The search query for YouTube
+  // The search query for YouTube - IMPORTANT: prefix with "ytsearch:" for search
   const searchQuery = `ytsearch:${team} NHL highlights 2024`;
   const outputPath = path.resolve(__dirname, `highlight_${Date.now()}.mp4`);
   const videoInfoPath = path.resolve(__dirname, `video_info_${Date.now()}.json`);
@@ -56,10 +42,23 @@ app.get("/api/analyze", async (req, res) => {
   // Mark this team as having an ongoing request
   ongoingRequests.set(team, { startTime: Date.now() });
 
-  try {
-    console.log(`Searching YouTube for: ${searchQuery}`);
+  // Set a timeout to automatically clean up if the request takes too long
+  const requestTimeout = setTimeout(() => {
+    cleanupRequest(team, outputPath, videoInfoPath);
+    
+    if (!res.headersSent) {
+      res.status(504).json({
+        error: "Analysis timed out",
+        message: "The analysis took too long to complete. Try again with a different team."
+      });
+    }
+  }, 3 * 60 * 1000); // 3 minutes timeout
 
-    // Get search results using youtube-dl
+  try {
+    console.log(`🔍 Searching YouTube for: ${searchQuery}`);
+
+    // Step 1: First, get the search results using youtube-dl's search feature
+    // This will return info about the top video for our search query
     const searchResults = await youtubedl(searchQuery, {
       dumpSingleJson: true,
       noPlaylist: true,
@@ -77,7 +76,8 @@ app.get("/api/analyze", async (req, res) => {
     const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
     const embedUrl = `https://www.youtube.com/embed/${videoId}`;
     
-    console.log(`Found video: ${videoUrl}`);
+    console.log(`🎥 Found video: ${videoUrl}`);
+    console.log(`📊 Video title: ${firstVideo.title}`);
     
     // Save video metadata to pass to Python script
     const videoInfo = {
@@ -87,29 +87,34 @@ app.get("/api/analyze", async (req, res) => {
       uploader: firstVideo.uploader || "",
       duration: firstVideo.duration || 0,
       view_count: firstVideo.view_count || 0,
-      team_query: team
+      team_query: team // Pass the original team query
     };
     
-    // Write video info to a file
+    // Write video info to a file for the Python script
     fs.writeFileSync(videoInfoPath, JSON.stringify(videoInfo, null, 2));
+    console.log(`✅ Saved video metadata to ${videoInfoPath}`);
     
-    // Send an initial response with just the video URL
-    res.json({
-      summary: `Loading analysis for ${team}...`,
-      teamPerformance: "Team analysis loading...",
-      playerPerformance: "Player analysis loading...",
-      videoUrl: embedUrl,
-      analysisStatus: "pending"
-    });
+    // Send an initial response with just the video URL so the user can start watching
+    if (!res.headersSent) {
+      res.json({
+        summary: `Loading analysis for ${team}...`,
+        teamPerformance: "Team analysis loading...",
+        playerPerformance: "Player analysis loading...",
+        videoUrl: embedUrl,
+        analysisStatus: "pending"
+      });
+    }
     
-    // Download the video in the background
-    console.log("Downloading video...");
+    // Now download and analyze the video in the background
+    console.log("📥 Downloading video...");
+
+    // Step 2: Download the specific video we found
     await youtubedl(videoUrl, {
       output: outputPath,
       format: 'best[ext=mp4]/best',
       noPlaylist: true,
       maxFilesize: "50m",
-      retries: 3
+      retries: 3          // Retry download up to 3 times
     });
     
     // Check if the file exists or if it's still a .part file
@@ -117,20 +122,25 @@ app.get("/api/analyze", async (req, res) => {
     let finalVideoPath = outputPath;
     
     if (fs.existsSync(partFilePath) && !fs.existsSync(outputPath)) {
+      console.log("⚠️ Found .part file instead of complete download");
       finalVideoPath = partFilePath;
     }
     
     if (!fs.existsSync(finalVideoPath)) {
-      throw new Error(`Video file not found`);
+      throw new Error(`Video file not found at ${finalVideoPath}`);
     }
     
-    console.log("Video downloaded, running AI analysis...");
+    console.log("✅ Video downloaded successfully");
+    console.log("🧠 Running AI analysis with Perplexity...");
     
-    // Run the Python script to analyze the video
-    execFile("python3", ["analyze_highlight.py", finalVideoPath, videoInfoPath], { cwd: __dirname }, 
+    // Run the Python script to analyze the video with the correct path and video info
+    const pythonProcess = execFile("python3", ["analyze_highlight.py", finalVideoPath, videoInfoPath], { cwd: __dirname }, 
       (error, stdout, stderr) => {
+        clearTimeout(requestTimeout);
+        
         if (error) {
-          console.error("Python error:", error.message);
+          console.error("❌ Python error:", error);
+          console.error("stderr:", stderr);
           
           // Store a generic result on error
           ongoingRequests.set(team, {
@@ -145,10 +155,10 @@ app.get("/api/analyze", async (req, res) => {
           });
         } else {
           try {
-            console.log("Analysis complete!");
+            console.log("✅ Analysis complete!");
             const result = JSON.parse(stdout);
             
-            // Store the analysis result
+            // Store the analysis result for future requests
             ongoingRequests.set(team, {
               startTime: Date.now(),
               result: {
@@ -159,8 +169,11 @@ app.get("/api/analyze", async (req, res) => {
                 analysisStatus: "complete"
               }
             });
+            
+            console.log(`✅ Analysis cached for ${team}`);
           } catch (parseErr) {
-            console.error("Failed to parse Python output");
+            console.error("❌ Failed to parse Python output:", parseErr);
+            console.error("stdout:", stdout);
             
             // Store a generic result on parse error
             ongoingRequests.set(team, {
@@ -176,36 +189,64 @@ app.get("/api/analyze", async (req, res) => {
           }
         }
         
-        // Clean up files
-        try {
-          if (fs.existsSync(finalVideoPath)) fs.unlinkSync(finalVideoPath);
-          if (fs.existsSync(videoInfoPath)) fs.unlinkSync(videoInfoPath);
-        } catch (e) {
-          console.error("Error cleaning up files:", e.message);
-        }
+        // Clean up the downloaded video and info file
+        cleanupVideo(outputPath);
+        cleanupInfoFile(videoInfoPath);
       }
     );
     
+    // Set a separate timeout for the Python process
+    setTimeout(() => {
+      if (pythonProcess && !pythonProcess.killed) {
+        console.log("⏱️ Python process taking too long, killing it");
+        pythonProcess.kill();
+        
+        // Store a timeout result
+        ongoingRequests.set(team, {
+          startTime: Date.now(),
+          result: {
+            summary: `Highlights for ${team}. Analysis took too long to complete.`,
+            teamPerformance: `${team} has been active in the NHL this season.`,
+            playerPerformance: "Watch the video to see player highlights.",
+            videoUrl: embedUrl,
+            analysisStatus: "complete"
+          }
+        });
+        
+        // Clean up
+        cleanupVideo(outputPath);
+        cleanupInfoFile(videoInfoPath);
+      }
+    }, 2 * 60 * 1000); // 2 minutes
+    
   } catch (err) {
-    console.error("Error:", err.message);
+    clearTimeout(requestTimeout);
+    console.error("❌ Error downloading or analyzing video:", err);
     
     // Remove from ongoing requests tracking
     ongoingRequests.delete(team);
     
     // Clean up downloaded files
-    try {
-      if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
-      if (fs.existsSync(outputPath + '.part')) fs.unlinkSync(outputPath + '.part');
-      if (fs.existsSync(videoInfoPath)) fs.unlinkSync(videoInfoPath);
-    } catch (e) {
-      console.error("Error cleaning up files:", e.message);
-    }
+    cleanupVideo(outputPath);
+    cleanupInfoFile(videoInfoPath);
     
-    // Only send error response if headers haven't been sent yet
     if (!res.headersSent) {
+      // Try to send a more useful error message
+      let errorMessage = "An unexpected error occurred.";
+      if (err.message && err.message.includes("No videos found")) {
+        errorMessage = `No highlight videos found for ${team}.`;
+      } else if (err.stderr && err.stderr.includes("ERROR:")) {
+        // Extract the actual error from youtube-dl's output
+        const errorMatch = err.stderr.match(/ERROR:\s*(.*)/);
+        if (errorMatch && errorMatch[1]) {
+          errorMessage = errorMatch[1];
+        }
+      }
+      
       res.status(500).json({ 
         error: "Video download or analysis failed.",
-        message: err.message
+        message: errorMessage,
+        details: err.message
       });
     }
   }
@@ -237,20 +278,66 @@ app.get("/api/analysis-status", (req, res) => {
   });
 });
 
+// Status endpoint
+app.get("/api/status", (req, res) => {
+  res.json({
+    status: "online",
+    requests: Array.from(ongoingRequests.keys())
+  });
+});
+
+function cleanupVideo(videoPath) {
+  if (fs.existsSync(videoPath)) {
+    fs.unlink(videoPath, (err) => {
+      if (err) console.warn("⚠️ Could not delete video:", err);
+      else console.log("🧹 Deleted video file:", videoPath);
+    });
+  }
+  
+  // Also try to remove .part file if it exists
+  const partPath = `${videoPath}.part`;
+  if (fs.existsSync(partPath)) {
+    fs.unlink(partPath, (err) => {
+      if (err) console.warn("⚠️ Could not delete .part file:", err);
+      else console.log("🧹 Deleted .part file:", partPath);
+    });
+  }
+}
+
+function cleanupInfoFile(infoPath) {
+  if (fs.existsSync(infoPath)) {
+    fs.unlink(infoPath, (err) => {
+      if (err) console.warn("⚠️ Could not delete info file:", err);
+      else console.log("🧹 Deleted info file:", infoPath);
+    });
+  }
+}
+
+function cleanupRequest(team, videoPath, infoPath) {
+  console.log(`🧹 Cleaning up request for team: ${team}`);
+  
+  // Remove from ongoing requests tracking
+  ongoingRequests.delete(team);
+  
+  // Delete files if they exist
+  cleanupVideo(videoPath);
+  cleanupInfoFile(infoPath);
+}
+
 // Clean up cache periodically
 setInterval(() => {
   const now = Date.now();
   for (const [team, data] of ongoingRequests.entries()) {
     // Remove entries older than 1 hour
     if (now - data.startTime > 3600000) {
+      console.log(`🧹 Removing stale cache for ${team}`);
       ongoingRequests.delete(team);
     }
   }
 }, 15 * 60 * 1000); // Check every 15 minutes
 
-// Start the server
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`API key available: ${process.env.PERPLEXITY_API_KEY ? 'Yes' : 'No'}`);
+  console.log(`✅ Server running at http://localhost:5000`);
+  console.log(`🔐 Make sure PERPLEXITY_API_KEY is set in your .env file`);
+  console.log(`📧 Email service available at /api/email/send`);
 });

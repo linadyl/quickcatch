@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { AnalysisResult } from "../types";
+import EmailSharePopup from "./EmailSharePopup";
+import { sendAnalysisEmail } from "../services/emailService";
 
 interface AnalysisModalProps {
   isOpen: boolean;
@@ -46,7 +48,7 @@ const formatText = (text: string) => {
       
       // Need to adjust future matches since we added content
       for (let j = i + 1; j < matches.length; j++) {
-        if (matches[j].index > index) {
+        if (matches[j].index !== undefined && matches[j].index > index) {
           matches[j].index += 11; // Length of "<br /><br />"
         }
       }
@@ -70,6 +72,16 @@ const AnalysisModal: React.FC<AnalysisModalProps> = ({
   const [completeAnalysis, setCompleteAnalysis] = useState<AnalysisResult | null>(null);
   const [pollingCount, setPollingCount] = useState(0);
   const [pollingActive, setPollingActive] = useState(false);
+  const [isEmailPopupOpen, setIsEmailPopupOpen] = useState(false);
+  const [emailStatus, setEmailStatus] = useState<{
+    sending: boolean;
+    success: boolean | null;
+    message: string | null;
+  }>({
+    sending: false,
+    success: null,
+    message: null
+  });
   
   useEffect(() => {
     // Reset polling when the modal is opened or closed
@@ -132,28 +144,117 @@ const AnalysisModal: React.FC<AnalysisModalProps> = ({
   // Use complete analysis if available, otherwise use the initial analysis
   const displayAnalysis = completeAnalysis || analysis;
   
+  // Handle email sharing
+  const handleOpenEmailPopup = () => {
+    // Only allow email sharing if we have analysis data
+    if (displayAnalysis && !loading && !error) {
+      setIsEmailPopupOpen(true);
+    }
+  };
+  
+  const handleCloseEmailPopup = () => {
+    setIsEmailPopupOpen(false);
+    // Reset email status after a delay
+    setTimeout(() => {
+      setEmailStatus({
+        sending: false,
+        success: null,
+        message: null
+      });
+    }, 3000);
+  };
+  
+  const handleSendEmail = async (email: string) => {
+    if (!displayAnalysis || !teamName) return;
+    
+    setEmailStatus({
+      sending: true,
+      success: null,
+      message: null
+    });
+    
+    try {
+      const response = await sendAnalysisEmail(email, teamName, displayAnalysis);
+      
+      if (response.success) {
+        setEmailStatus({
+          sending: false,
+          success: true,
+          message: "Analysis sent to your email!"
+        });
+        
+        // Close the popup after a success message delay
+        setTimeout(() => {
+          setIsEmailPopupOpen(false);
+        }, 2000);
+      } else {
+        setEmailStatus({
+          sending: false,
+          success: false,
+          message: response.message || "Failed to send email. Please try again."
+        });
+      }
+    } catch (error) {
+      setEmailStatus({
+        sending: false,
+        success: false,
+        message: "An error occurred. Please try again."
+      });
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 backdrop-blur-sm bg-lime-100 bg-opacity-30 flex justify-center items-center z-50 p-2">
-      <div className="bg-white rounded-xl shadow-xl w-[70%] h-[85vh] flex flex-col relative border border-black">
-        {/* Header */}
-        <div className="p-5 border-b border-gray-200 bg-lime-100 rounded-t-xl flex justify-between items-center">
+    <div className="fixed inset-0 bg-lime-100 bg-opacity-80 backdrop-blur-sm flex justify-center items-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-11/12 max-w-4xl max-h-[90vh] flex flex-col relative border border-lime-300">
+        <div className="p-6 border-b border-gray-200 flex justify-between items-center bg-gradient-to-r from-lime-50 to-white rounded-t-2xl">
           <h2 className="text-2xl font-bold text-gray-800">
             {teamName ? `${teamName} Highlights` : "NHL Highlights"}
           </h2>
-          <button
-            onClick={onClose}
-            className="text-gray-500 hover:text-red-500 text-xl bg-gray-200 rounded-full h-8 w-8 flex items-center justify-center"
-          >
-            ✕
-          </button>
+          <div className="flex items-center space-x-2">
+            {/* Email share button */}
+            <button
+              onClick={handleOpenEmailPopup}
+              disabled={loading || !displayAnalysis || !!error}
+              className={`flex items-center px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                loading || !displayAnalysis || !!error
+                  ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                  : "bg-lime-600 text-white hover:bg-lime-700"
+              }`}
+              title={
+                loading 
+                  ? "Analysis loading..." 
+                  : !displayAnalysis || !!error
+                    ? "Analysis unavailable"
+                    : "Share analysis via email"
+              }
+            >
+              <svg 
+                xmlns="http://www.w3.org/2000/svg" 
+                className="h-4 w-4 mr-1" 
+                viewBox="0 0 20 20" 
+                fill="currentColor"
+              >
+                <path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z" />
+                <path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z" />
+              </svg>
+              Email
+            </button>
+            
+            {/* Close button */}
+            <button
+              onClick={onClose}
+              className="text-gray-500 hover:text-red-500 text-xl flex items-center justify-center bg-white rounded-full h-8 w-8 border border-gray-300 hover:border-red-300 shadow-sm transition-colors"
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6 bg-white">
+        <div className="flex-1 overflow-y-auto p-6">
           {loading ? (
-            <div className="text-center py-12">
+            <div className="text-center py-8">
               <h3 className="text-xl font-bold text-gray-800 mb-4">
                 Finding {teamName} Highlights
               </h3>
@@ -184,7 +285,7 @@ const AnalysisModal: React.FC<AnalysisModalProps> = ({
             <>
               {/* Always show video immediately if available */}
               {displayAnalysis.videoUrl && (
-                <div className="w-full aspect-video rounded-xl overflow-hidden mb-6 bg-black border-2 border-lime-200 max-w-5xl mx-auto">
+                <div className="w-full aspect-video rounded-lg overflow-hidden mb-6 shadow-md">
                   <iframe
                     width="100%"
                     height="100%"
@@ -196,13 +297,11 @@ const AnalysisModal: React.FC<AnalysisModalProps> = ({
                 </div>
               )}
 
-              <div className="space-y-6 px-2">
+              <div className="space-y-6">
                 <div>
-                  <h3 className="text-lg font-semibold text-lime-600 mb-2 flex items-center">
-                    <span className="mr-2">📝</span> Summary
-                  </h3>
+                  <h3 className="text-lg font-semibold text-lime-600 mb-2">📝 Summary</h3>
                   <div 
-                    className="text-gray-700 bg-lime-50 p-4 rounded-lg border border-lime-200"
+                    className="text-gray-700 bg-lime-50 p-4 rounded-lg shadow-sm border border-lime-100"
                     dangerouslySetInnerHTML={{ 
                       __html: formatText(displayAnalysis.summary || "No summary available") +
                       (displayAnalysis.analysisStatus === "pending" ? 
@@ -212,11 +311,9 @@ const AnalysisModal: React.FC<AnalysisModalProps> = ({
                 </div>
 
                 <div>
-                  <h3 className="text-lg font-semibold text-lime-600 mb-2 flex items-center">
-                    <span className="mr-2">📊</span> Team Performance
-                  </h3>
+                  <h3 className="text-lg font-semibold text-lime-600 mb-2">📊 Team Performance</h3>
                   <div 
-                    className="text-gray-700 bg-lime-50 p-4 rounded-lg border border-lime-200"
+                    className="text-gray-700 bg-lime-50 p-4 rounded-lg shadow-sm border border-lime-100"
                     dangerouslySetInnerHTML={{ 
                       __html: formatText(displayAnalysis.teamPerformance || "No team analysis available") +
                       (displayAnalysis.analysisStatus === "pending" ? 
@@ -226,11 +323,9 @@ const AnalysisModal: React.FC<AnalysisModalProps> = ({
                 </div>
 
                 <div>
-                  <h3 className="text-lg font-semibold text-lime-600 mb-2 flex items-center">
-                    <span className="mr-2">🏒</span> Player Performance
-                  </h3>
+                  <h3 className="text-lg font-semibold text-lime-600 mb-2">🏒 Player Performance</h3>
                   <div 
-                    className="text-gray-700 bg-lime-50 p-4 rounded-lg border border-lime-200"
+                    className="text-gray-700 bg-lime-50 p-4 rounded-lg shadow-sm border border-lime-100"
                     dangerouslySetInnerHTML={{ 
                       __html: formatText(displayAnalysis.playerPerformance || "No player analysis available") +
                       (displayAnalysis.analysisStatus === "pending" ? 
@@ -266,17 +361,43 @@ const AnalysisModal: React.FC<AnalysisModalProps> = ({
             </div>
           )}
         </div>
-        
-        {/* Footer */}
-        <div className="p-4 border-t border-gray-200 bg-lime-50 rounded-b-xl flex justify-end">
-          <button 
-            onClick={onClose} 
-            className="px-4 py-2 bg-gray-900 text-white rounded-lg text-sm hover:bg-gray-700"
-          >
-            Close
-          </button>
-        </div>
       </div>
+      
+      {/* Email share popup */}
+      <EmailSharePopup
+        isOpen={isEmailPopupOpen}
+        onClose={handleCloseEmailPopup}
+        onSubmit={handleSendEmail}
+        teamName={teamName}
+      />
+      
+      {/* Email status toast notification */}
+      {emailStatus.message && (
+        <div 
+          className={`fixed bottom-4 right-4 px-6 py-3 rounded-lg shadow-lg 
+            ${emailStatus.success === true 
+              ? "bg-green-600 text-white" 
+              : emailStatus.success === false 
+                ? "bg-red-600 text-white" 
+                : "bg-gray-700 text-white"
+            } 
+            transition-opacity duration-300 ${emailStatus.message ? "opacity-100" : "opacity-0"}`}
+        >
+          <div className="flex items-center">
+            {emailStatus.success === true && (
+              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
+              </svg>
+            )}
+            {emailStatus.success === false && (
+              <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+              </svg>
+            )}
+            <span>{emailStatus.message}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
