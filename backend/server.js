@@ -6,7 +6,12 @@ const fs = require("fs");
 const path = require("path");
 
 const app = express();
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
+
+app.listen(PORT, () => {
+  console.log(`✅ Server running at http://localhost:${PORT}`);
+  console.log(`🔐 Make sure PERPLEXITY_API_KEY is set in your .env file`);
+});
 
 // Enable CORS and JSON parsing
 app.use(cors());

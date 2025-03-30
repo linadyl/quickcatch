@@ -91,7 +91,7 @@ def compress_video(input_path):
 
 def extract_frames(video_path, num_frames=5):
     """Extract frames from video for analysis."""
-    frames_dir = os.path.join(tempfile.gettempdir(), "frames")
+    frames_dir = os.path.join('/tmp', "frames")
     os.makedirs(frames_dir, exist_ok=True)
     
     # Calculate frame intervals to extract evenly distributed frames
