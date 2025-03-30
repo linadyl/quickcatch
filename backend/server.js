@@ -4,14 +4,85 @@ const youtubedl = require("youtube-dl-exec");
 const { execFile } = require("child_process");
 const fs = require("fs");
 const path = require("path");
+const { spawnSync } = require("child_process");
+
+// Improved error handling and startup logging
+process.on('uncaughtException', (err) => {
+  console.error('UNCAUGHT EXCEPTION! 💥 Shutting down...');
+  console.error(err.name, err.message);
+  console.error(err.stack);
+  process.exit(1);
+});
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
-  console.log(`✅ Server running at http://localhost:${PORT}`);
-  console.log(`🔐 Make sure PERPLEXITY_API_KEY is set in your .env file`);
-});
+// Environment variable check
+console.log('🔐 Environment check:');
+console.log(`PORT: ${process.env.PORT || '5000 (default)'}`);
+console.log(`NODE_ENV: ${process.env.NODE_ENV || 'development (default)'}`);
+console.log(`PERPLEXITY_API_KEY: ${process.env.PERPLEXITY_API_KEY ? '✅ Set' : '❌ Not Set'}`);
+
+// Check external dependencies
+console.log('\n📋 Checking external dependencies...');
+
+// Check if ffmpeg is available
+try {
+  const ffmpegCheck = spawnSync('ffmpeg', ['-version']);
+  if (ffmpegCheck.error) {
+    console.error('❌ ffmpeg not found:', ffmpegCheck.error.message);
+  } else {
+    const version = ffmpegCheck.stdout.toString().split('\n')[0];
+    console.log(`✅ ffmpeg detected: ${version}`);
+  }
+} catch (err) {
+  console.error('❌ Error checking ffmpeg:', err.message);
+}
+
+// Check if python is available
+try {
+  const pythonCheck = spawnSync('python3', ['--version']);
+  if (pythonCheck.error) {
+    console.error('❌ Python3 not found:', pythonCheck.error.message);
+  } else {
+    const version = pythonCheck.stdout.toString().trim();
+    console.log(`✅ Python detected: ${version}`);
+  }
+} catch (err) {
+  console.error('❌ Error checking Python:', err.message);
+}
+
+// Check if youtube-dl binary is accessible
+try {
+  let binary = '';
+  if (typeof youtubedl.getYtdlBinary === 'function') {
+    binary = youtubedl.getYtdlBinary();
+    console.log(`✅ YouTube-DL binary detected: ${binary}`);
+  } else {
+    console.log('⚠️ getYtdlBinary function not available, attempting fallback check');
+    // Try to verify the binary using a simple version check
+    const ytdlCheck = youtubedl('--version', {});
+    ytdlCheck.then((output) => {
+      console.log(`✅ YouTube-DL working: version ${output.trim()}`);
+    }).catch((err) => {
+      console.error('❌ YouTube-DL check failed:', err.message);
+    });
+  }
+} catch (err) {
+  console.error('❌ Error checking YouTube-DL:', err.message);
+}
+
+// Check if analyze_highlight.py exists
+try {
+  const scriptPath = path.join(__dirname, 'analyze_highlight.py');
+  if (fs.existsSync(scriptPath)) {
+    console.log(`✅ analyze_highlight.py found at: ${scriptPath}`);
+  } else {
+    console.error(`❌ analyze_highlight.py not found at: ${scriptPath}`);
+  }
+} catch (err) {
+  console.error('❌ Error checking analyze_highlight.py:', err.message);
+}
 
 // Enable CORS and JSON parsing
 app.use(cors());
@@ -19,6 +90,16 @@ app.use(express.json());
 
 // Track ongoing requests to prevent duplicates
 const ongoingRequests = new Map();
+
+// Simplified health check endpoint that doesn't depend on other components
+app.get("/api/status", (req, res) => {
+  res.json({
+    status: "online",
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    requests: Array.from(ongoingRequests.keys())
+  });
+});
 
 app.get("/api/analyze", async (req, res) => {
   const team = req.query.team;
@@ -279,14 +360,6 @@ app.get("/api/analysis-status", (req, res) => {
   });
 });
 
-// Status endpoint
-app.get("/api/status", (req, res) => {
-  res.json({
-    status: "online",
-    requests: Array.from(ongoingRequests.keys())
-  });
-});
-
 function cleanupVideo(videoPath) {
   if (fs.existsSync(videoPath)) {
     fs.unlink(videoPath, (err) => {
@@ -337,7 +410,39 @@ setInterval(() => {
   }
 }, 15 * 60 * 1000); // Check every 15 minutes
 
+// Create a basic HTML status page
+app.get("/", (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>NHL Highlights API</title>
+      <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        h1 { color: #0056b3; }
+        .status { padding: 15px; background-color: #f0f8ff; border-radius: 5px; margin: 10px 0; }
+        code { background-color: #f5f5f5; padding: 2px 4px; border-radius: 3px; }
+      </style>
+    </head>
+    <body>
+      <h1>NHL Highlights Analysis API</h1>
+      <div class="status">
+        <p>✅ Server is running</p>
+        <p>🕒 Uptime: ${(process.uptime() / 60).toFixed(2)} minutes</p>
+        <p>🔄 Active analyses: ${ongoingRequests.size}</p>
+      </div>
+      <h2>API Endpoints:</h2>
+      <ul>
+        <li><code>GET /api/status</code> - Check server status</li>
+        <li><code>GET /api/analyze?team=TEAM_NAME</code> - Request team highlight analysis</li>
+        <li><code>GET /api/analysis-status?team=TEAM_NAME</code> - Check analysis status</li>
+      </ul>
+    </body>
+    </html>
+  `);
+});
+
 app.listen(PORT, () => {
-  console.log(`✅ Server running at http://localhost:5000`);
+  console.log(`✅ Server running at http://localhost:${PORT}`);
   console.log(`🔐 Make sure PERPLEXITY_API_KEY is set in your .env file`);
 });

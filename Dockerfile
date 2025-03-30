@@ -1,33 +1,33 @@
-FROM node:16
+FROM node:18-slim
 
-# Install Python and required system dependencies
-RUN apt-get update && apt-get install -y \
-    python3 python3-pip ffmpeg
-
-# Install yt-dlp instead of youtube-dl (more reliable)
-RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp && \
-    chmod a+rx /usr/local/bin/yt-dlp && \
-    ln -s /usr/local/bin/yt-dlp /usr/local/bin/youtube-dl
-
-# Set up app directory
 WORKDIR /app
 
-# Copy package files and install dependencies
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    ffmpeg \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy package files
 COPY package*.json ./
+
+# Install Node.js dependencies
 RUN npm install
 
-# Install Python dependencies
+# Copy Python requirements and install
 COPY requirements.txt ./
 RUN pip3 install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy application files
 COPY . .
 
-# Railway will set the PORT environment variable
-ENV PORT=5000
+# Setup youtube-dl/yt-dlp
+RUN node setup-ytdl.js
 
-# Expose the port
-EXPOSE $PORT
+# Expose the port the app runs on
+EXPOSE 5000
 
-# Command to run the app
+# Command to run the application
 CMD ["node", "server.js"]
