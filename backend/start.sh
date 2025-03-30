@@ -19,6 +19,28 @@ if [ ! -f server.js ]; then
   exit 1
 fi
 
+# Create and use virtual environment if not in one already
+if [ -z "$VIRTUAL_ENV" ]; then
+  echo -e "${BLUE}Setting up Python virtual environment${NC}"
+  
+  # Ensure venv module is available
+  if ! python3 -m venv --help > /dev/null 2>&1; then
+    echo -e "${YELLOW}Installing Python venv module${NC}"
+    apt-get update && apt-get install -y python3-venv
+  fi
+  
+  # Create virtual environment
+  if [ ! -d "venv" ]; then
+    python3 -m venv venv
+  fi
+  
+  # Activate virtual environment
+  source venv/bin/activate
+  echo -e "${GREEN}✓ Virtual environment activated${NC}"
+else
+  echo -e "${GREEN}✓ Already in virtual environment: $VIRTUAL_ENV${NC}"
+fi
+
 # Verify youtube-dl/yt-dlp is available
 if command -v yt-dlp >/dev/null 2>&1; then
   echo -e "${GREEN}✓ yt-dlp is installed${NC}"
@@ -79,7 +101,8 @@ if [ ! -f "requirements.txt" ]; then
 fi
 
 echo -e "${BLUE}Installing Python requirements...${NC}"
-python3 -m pip install --no-cache-dir -r requirements.txt
+pip install --upgrade pip
+pip install -r requirements.txt
 
 # Check for PERPLEXITY_API_KEY
 if [ -z "$PERPLEXITY_API_KEY" ]; then
