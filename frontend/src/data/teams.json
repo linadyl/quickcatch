@@ -1,0 +1,58 @@
+[
+  {
+    "conference": "Eastern Conference",
+    "division": "Metropolitan",
+    "teams": [
+      { "name": "Carolina Hurricanes", "logo": "../src/assets/logos/carolina.png" },
+      { "name": "Columbus Blue Jackets", "logo": "../src/assets/logos/columbus.png" },
+      { "name": "New Jersey Devils", "logo": "../src/assets/logos/newjersey.png" },
+      { "name": "New York Islanders", "logo": "../src/assets/logos/nyislanders.png" },
+      { "name": "New York Rangers", "logo": "../src/assets/logos/nyrangers.png" },
+      { "name": "Philadelphia Flyers", "logo": "../src/assets/logos/philadelphia.png" },
+      { "name": "Pittsburgh Penguins", "logo": "../src/assets/logos/pittsburgh.png" },
+      { "name": "Washington Capitals", "logo": "../src/assets/logos/washington.png" }
+    ]
+  },
+  {
+    "conference": "Eastern Conference",
+    "division": "Atlantic",
+    "teams": [
+      { "name": "Boston Bruins", "logo": "../src/assets/logos/boston.png" },
+      { "name": "Buffalo Sabres", "logo": "../src/assets/logos/buffalo.png" },
+      { "name": "Detroit Red Wings", "logo": "../src/assets/logos/detroit.png" },
+      { "name": "Florida Panthers", "logo": "../src/assets/logos/florida.png" },
+      { "name": "Montreal Canadiens", "logo": "../src/assets/logos/montreal.png" },
+      { "name": "Ottawa Senators", "logo": "../src/assets/logos/ottawa.png" },
+      { "name": "Tampa Bay Lightning", "logo": "../src/assets/logos/tampabay.png" },
+      { "name": "Toronto Maple Leafs", "logo": "../src/assets/logos/toronto.png" }
+    ]
+  },
+  {
+    "conference": "Western Conference",
+    "division": "Central",
+    "teams": [
+      { "name": "Chicago Blackhawks", "logo": "../src/assets/logos/chicago.png" },
+      { "name": "Colorado Avalanche", "logo": "../src/assets/logos/colorado.png" },
+      { "name": "Dallas Stars", "logo": "../src/assets/logos/dallas.png" },
+      { "name": "Minnesota Wild", "logo": "../src/assets/logos/minnesota.png" },
+      { "name": "Nashville Predators", "logo": "../src/assets/logos/nashville.png" },
+      { "name": "St. Louis Blues", "logo": "../src/assets/logos/stlouis.png" },
+      { "name": "Utah Hockey Club", "logo": "../src/assets/logos/utah.png" },
+      { "name": "Winnipeg Jets", "logo": "../src/assets/logos/winnipeg.png" }
+    ]
+  },
+  {
+    "conference": "Western Conference",
+    "division": "Pacific",
+    "teams": [
+      { "name": "Anaheim Ducks", "logo": "../src/assets/logos/anaheim.png" },
+      { "name": "Calgary Flames", "logo": "../src/assets/logos/calgary.png" },
+      { "name": "Edmonton Oilers", "logo": "../src/assets/logos/edmonton.png" },
+      { "name": "Los Angeles Kings", "logo": "../src/assets/logos/losangeles.png" },
+      { "name": "San Jose Sharks", "logo": "../src/assets/logos/sanjose.png" },
+      { "name": "Seattle Kraken", "logo": "../src/assets/logos/seattle.png" },
+      { "name": "Vancouver Canucks", "logo": "../src/assets/logos/vancouver.png" },
+      { "name": "Vegas Golden Knights", "logo": "../src/assets/logos/vegas.png" }
+    ]
+  }
+]
